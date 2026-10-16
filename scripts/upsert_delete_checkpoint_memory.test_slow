@@ -1,0 +1,60 @@
+# name: test/sql/storage/update/upsert_delete_checkpoint_memory.test_slow
+# description: Test memory reclamation after repeated upserts and deletes
+# group: [storage, update]
+
+load __TEST_DIR__/upsert_delete_checkpoint_memory.db
+
+statement ok
+PRAGMA memory_limit='384MB';
+
+statement ok
+PRAGMA checkpoint_threshold='1MB';
+
+statement ok
+CREATE TABLE t (
+    id BIGINT PRIMARY KEY,
+    payload VARCHAR,
+    del BOOLEAN
+);
+
+statement ok
+INSERT INTO t
+SELECT
+    i,
+    repeat('x', 384) || (i % 997)::VARCHAR,
+    (i % 20 = 0)
+FROM range(300000) tbl(i);
+
+loop i 0 10
+
+statement ok
+INSERT INTO t
+SELECT
+    i,
+    repeat('x', 384) || (i % 997)::VARCHAR,
+    (i % 20 = 0)
+FROM range(0, 100000) tbl(i)
+ON CONFLICT (id) DO UPDATE
+SET payload = excluded.payload,
+    del = excluded.del;
+
+statement ok
+INSERT INTO t
+SELECT
+    i,
+    repeat('x', 384) || (i % 997)::VARCHAR,
+    (i % 20 = 0)
+FROM range(0, 100000) tbl(i)
+ON CONFLICT (id) DO UPDATE
+SET payload = excluded.payload,
+    del = excluded.del;
+
+statement ok
+DELETE FROM t WHERE del;
+
+endloop
+
+query I
+SELECT COUNT(*) FROM t;
+----
+285000
